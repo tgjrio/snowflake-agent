@@ -1,0 +1,4 @@
+.venv/
+.env
+*.p8
+/scraped_data
