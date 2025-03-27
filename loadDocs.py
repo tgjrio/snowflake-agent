@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 
 # Load environment variables (e.g., API key and Snowflake credentials)
-load_dotenv()
+load_dotenv() #DD
 
 # Configure logging for tracking execution
 logging.basicConfig(
@@ -30,7 +30,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Snowflake connection parameters
-SNOWFLAKE_ACCOUNT   = os.getenv("SNOWFLAKE_ACCOUNT", 'SZNCRNI-AIAGENTS')
+
+SNOWFLAKE_ACCOUNT   = os.getenv("SNOWFLAKE_ACCOUNT", 'SZNCRNI-SNOWFLAKEAGENT')
 SNOWFLAKE_USER      = os.getenv("SNOWFLAKE_USER", 'SERVICE_ACCOUNT_SCRAPY')
 SNOWFLAKE_DATABASE  = os.getenv("SNOWFLAKE_DATABASE", 'SNOWFLAKE_DOCUMENTATION')
 SNOWFLAKE_SCHEMA    = os.getenv("SNOWFLAKE_SCHEMA", 'STAGING')
@@ -63,7 +64,7 @@ sf_connection_params = {
 session = Session.builder.configs(sf_connection_params).create()
 
 # Constants
-BASE_URL = "https://docs.snowflake.com/"
+BASE_URL = "https://docs.snowflake.com"
 
 def extract_tree_data(tree_data, base_url=BASE_URL):
     """
@@ -76,7 +77,7 @@ def extract_tree_data(tree_data, base_url=BASE_URL):
     """
     def process_node(node, result_list):
         if not isinstance(node, dict):
-            return
+            return 
         
         if all(key in node for key in ['id', 'href', 'label', 'type', 'depth', 'parentRef']):
             entry = {
@@ -100,14 +101,23 @@ def extract_tree_data(tree_data, base_url=BASE_URL):
     return result
 
 def setup_snowflake_tables(session):
-    """
-    Create tables in Snowflake for storing tree data and Markdown content if they don’t exist.
-    Args:
-        session: Snowpark session object
-    """
-    # Create tree data table
+    # Log the current database and schema
+    current_db = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
+    current_schema = session.sql("SELECT CURRENT_SCHEMA()").collect()[0][0]
+    logger.info(f"Current database: {current_db}, Current schema: {current_schema}")
+
+    # Explicitly set the database and schema
+    session.sql("USE DATABASE SNOWFLAKE_DOCUMENTATION").collect()
+    session.sql("USE SCHEMA STAGING").collect()
+    logger.info("Set context to SNOWFLAKE_DOCUMENTATION.STAGING")
+
+    # Drop the table to start fresh (optional, for debugging)
+    session.sql("DROP TABLE IF EXISTS TEST_SETUP").collect()
+    logger.info("Dropped TEST_SETUP table if it existed")
+
+    # Create the table
     session.sql("""
-        CREATE TABLE IF NOT EXISTS DOCUMENTATION (
+        CREATE TABLE IF NOT EXISTS TEST_SETUP (
             ID VARCHAR,
             URL VARCHAR,
             LABEL VARCHAR,
@@ -117,7 +127,15 @@ def setup_snowflake_tables(session):
             SECTION VARCHAR
         )
     """).collect()
-    logger.info("Ensured DOC_PAGES table exists")
+
+    # Verify the table exists
+    result = session.sql("SHOW TABLES LIKE 'TEST_SETUP' IN SNOWFLAKE_DOCUMENTATION.STAGING").collect()
+    if result:
+        logger.info(f"Table TEST_SETUP created successfully: {result}")
+    else:
+        logger.error("Table TEST_SETUP was not created!")
+    
+    logger.info("Ensured TEST_SETUP table exists")
 
 def upload_to_snowflake(session, tree_data, section_name):
     """
@@ -135,8 +153,8 @@ def upload_to_snowflake(session, tree_data, section_name):
     # Upload tree data
     if tree_data:
         df = session.create_dataframe(tree_data)
-        df.write.mode("append").save_as_table("DOCUMENTATION")
-        logger.info(f"Uploaded {len(tree_data)} rows to DOCUMENTATION for section: {section_name}")
+        df.write.mode("append").save_as_table("TEST_SETUP")
+        logger.info(f"Uploaded {len(tree_data)} rows to TEST_SETUP for section: {section_name}")
     
 
 def scrape_and_process(url, api_key, section_name):
@@ -199,7 +217,7 @@ if __name__ == "__main__":
         {"url": "https://docs.snowflake.com/en/guides", "basename": "guides"},
         {"url": "https://docs.snowflake.com/en/developer", "basename": "developer"},
         {"url": "https://docs.snowflake.com/en/reference", "basename": "reference"},
-        # {"url": "https://docs.snowflake.com/en/release-notes/overview", "basename": "releases"},
+        {"url": "https://docs.snowflake.com/en/release-notes/overview", "basename": "releases"},
     ]
     
     # Iterate through sections and scrape each one
